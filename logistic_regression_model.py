@@ -2,7 +2,7 @@ from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.classification import LogisticRegression
 
-# create SparkSeeesion
+# create SparkSession
 spark = (SparkSession.builder.appName("Fraud_LR_Weighted").config("spark.sql.shuffle.partitions", "8").getOrCreate())
 
 # load dataset from HDFS
@@ -30,7 +30,7 @@ print(f"Weight for nonfraud: {nonfraud_weight:.4f}")
 # add the weight column to df based on label
 df_weighted = df_model.withColumn("weight", F.when(F.col("label") == 1, F.lit(fraud_weight)).otherwise(F.lit(nonfraud_weight)))
 
-# choose features (numeric) NEED TO CHANGE
+# choose features (numeric)
 feature_cols = ["amount", "spending_deviation_score", "velocity_score", "geo_anomaly_score",]
 
 assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handleInvalid="keep",)
