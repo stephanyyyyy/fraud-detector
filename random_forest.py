@@ -1,21 +1,21 @@
 from pyspark.sql import SparkSession, functions as F
-from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
 from pyspark.ml import Pipeline
 
 
-# where to save the trained logistic regression pipeline model (inside the Spark container)
-MODEL_PATH = "/opt/spark/work-dir/fraud_lr_model"
+# Where to save the trained RF pipeline model (inside Spark container)
+MODEL_PATH = "/opt/spark/work-dir/fraud_rf_model"
 
-# start spark session
+# Start Spark
 spark = (
     SparkSession.builder
-    .appName("Fraud_LR_Weighted")
-    .config("spark.sql.shuffle.partitions", "8") # can adjust # of partitions for more or less parallelism
+    .appName("Fraud_RF_Weighted")
+    .config("spark.sql.shuffle.partitions", "8")  # can adjust # of partitions for more or less parallelism
     .getOrCreate()
 )
 
-# load dataset from HDFS
+# Load data from HDFS
 hdfs_path = "hdfs://namenode:8020/training_data/modified_fraud_dataset.csv"
 df = (
     spark.read
@@ -24,10 +24,10 @@ df = (
     .csv(hdfs_path)
 )
 
-# Label column 0/1
+# Label as 0/1
 df_model = df.withColumn("label", F.col("is_fraud").cast("int"))
 
-# time-based features from raw timestamp
+# Time-based features from raw timestamp
 df_model = df_model.withColumn("ts", F.to_timestamp("timestamp"))
 df_model = df_model.withColumn("hour_of_day", F.hour("ts"))
 df_model = df_model.withColumn("day_of_week", F.dayofweek("ts"))
@@ -36,34 +36,34 @@ df_model = df_model.withColumn(
     (F.col("day_of_week") >= 6).cast("int")
 )
 
-# 4. Use full dataset
-df_used = df_model
-used_rows = df_used.count()
-print(f"Using ALL {used_rows} rows for weighted LR in Spark.")
+# Use all rows
+df_full = df_model
+full_rows = df_full.count()
+print(f"Using ALL {full_rows} rows for weighted Random Forest.")
 
 # Class counts for weights
-fraud_count = df_used.filter(F.col("label") == 1).count()
-nonfraud_count = df_used.filter(F.col("label") == 0).count()
+fraud_count = df_full.filter(F.col("label") == 1).count()
+nonfraud_count = df_full.filter(F.col("label") == 0).count()
 
 if fraud_count == 0 or nonfraud_count == 0:
-    fraud_weight = 1.0
-    nonfraud_weight = 1.0
+    weight_for_fraud = 1.0
+    weight_for_nonfraud = 1.0
 else:
     majority = max(fraud_count, nonfraud_count)
-    fraud_weight = majority / float(fraud_count)
-    nonfraud_weight = majority / float(nonfraud_count)
+    weight_for_fraud = majority / float(fraud_count)
+    weight_for_nonfraud = majority / float(nonfraud_count)
 
-print(f"Weight for fraud (label=1):     {fraud_weight:.4f}")
-print(f"Weight for non-fraud (label=0): {nonfraud_weight:.4f}")
+print(f"Weight for fraud (label=1):     {weight_for_fraud:.4f}")
+print(f"Weight for non-fraud (label=0): {weight_for_nonfraud:.4f}")
 
 # Add weight column
-df_weighted = df_used.withColumn(
+df_weighted = df_full.withColumn(
     "weight",
-    F.when(F.col("label") == 1, F.lit(fraud_weight))
-     .otherwise(F.lit(nonfraud_weight))
+    F.when(F.col("label") == 1, F.lit(weight_for_fraud))
+     .otherwise(F.lit(weight_for_nonfraud))
 )
 
-# Categorical & numeric features
+# Categorical and numeric features
 categorical_cols = [
     "transaction_type",
     "device_used",
@@ -80,7 +80,7 @@ numeric_cols = [
     "is_weekend",
 ]
 
-# StringIndexer for each categorical
+# StringIndexer for each categorical feature
 indexers = [
     StringIndexer(
         inputCol=c,
@@ -97,7 +97,7 @@ encoder = OneHotEncoder(
     dropLast=False,
 )
 
-# Final feature vector: numeric + one-hot categoricals
+# Final features = numeric + one-hot categoricals
 feature_cols = numeric_cols + [f"{c}_oh" for c in categorical_cols]
 print("Using features:", feature_cols)
 
@@ -111,23 +111,23 @@ assembler = VectorAssembler(
 train_df, test_df = df_weighted.randomSplit([0.8, 0.2], seed=42)
 print(f"Train count: {train_df.count()}  Test count: {test_df.count()}")
 
-# Logistic Regression with weights
-lr = LogisticRegression(
+# Random Forest with class weights
+rf = RandomForestClassifier(
     featuresCol="features",
     labelCol="label",
     weightCol="weight",
-    maxIter=20,
-    regParam=0.0,
-    elasticNetParam=0.0,
+    numTrees=20,   # can adjust
+    maxDepth=6,    # can adjust
+    seed=42,
 )
 
-# Pipeline: index -> encode -> assemble -> LR
+# Pipeline: index → encode → assemble → RF
 pipeline = Pipeline(
-    stages=indexers + [encoder, assembler, lr]
+    stages=indexers + [encoder, assembler, rf]
 )
 
 pipeline_model = pipeline.fit(train_df)
-print("Weighted LR pipeline model training completed.")
+print("Weighted RF pipeline training completed.")
 
 # Predictions on test set for metrics
 predictions = pipeline_model.transform(test_df).select("label", "prediction").cache()
@@ -137,37 +137,37 @@ preds = predictions.select(
     F.col("prediction").cast("int").alias("prediction")
 )
 
-# confusion matrix
-true_pos = preds.filter((F.col("label") == 1) & (F.col("prediction") == 1)).count()
-true_neg = preds.filter((F.col("label") == 0) & (F.col("prediction") == 0)).count()
-false_pos = preds.filter((F.col("label") == 0) & (F.col("prediction") == 1)).count()
-false_neg = preds.filter((F.col("label") == 1) & (F.col("prediction") == 0)).count()
+# Confusion matrix
+tp = preds.filter((F.col("label") == 1) & (F.col("prediction") == 1)).count()
+tn = preds.filter((F.col("label") == 0) & (F.col("prediction") == 0)).count()
+fp = preds.filter((F.col("label") == 0) & (F.col("prediction") == 1)).count()
+fn = preds.filter((F.col("label") == 1) & (F.col("prediction") == 0)).count()
 
-total = true_pos + true_neg + false_pos + false_neg
+total = tp + tn + fp + fn
 
-accuracy = (true_pos + true_neg) / total if total > 0 else 0.0
-precision_fraud = true_pos / (true_pos + false_pos) if (true_pos + false_pos) > 0 else 0.0
-recall_fraud = true_pos / (true_pos + false_neg) if (true_pos + false_neg) > 0 else 0.0
+accuracy = (tp + tn) / total if total > 0 else 0.0
+precision_fraud = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+recall_fraud = tp / (tp + fn) if (tp + fn) > 0 else 0.0
 f1_fraud = (
     2 * (precision_fraud * recall_fraud) / (precision_fraud + recall_fraud)
     if (precision_fraud + recall_fraud) > 0
     else 0.0
 )
 
-print("\n=== CONFUSION MATRIX (Weighted LR) ===")
-print(f"TP (fraud predicted fraud):       {true_pos}")
-print(f"FN (fraud predicted non-fraud):   {false_neg}")
-print(f"FP (non-fraud predicted fraud):   {false_pos}")
-print(f"TN (non-fraud predicted non):     {true_neg}")
+print("\n=== CONFUSION MATRIX (Weighted RF) ===")
+print(f"TP (fraud predicted fraud):       {tp}")
+print(f"FN (fraud predicted non-fraud):   {fn}")
+print(f"FP (non-fraud predicted fraud):   {fp}")
+print(f"TN (non-fraud predicted non):     {tn}")
 
-print("\n=== METRICS (Weighted LR) ===")
+print("\n=== METRICS (Weighted RF) ===")
 print(f"Accuracy:              {accuracy:.4f}")
 print(f"Precision (fraud=1):   {precision_fraud:.4f}")
 print(f"Recall (fraud=1):      {recall_fraud:.4f}")
-print(f"F1-score (fraud=1):    {f1_fraud:.4f}\n")
+print(f"F1-score (fraud=1):    {f1_fraud:.4f}")
 
-# save LR pipeline model
-print(f"Saving Logistic Regression model to: {MODEL_PATH}")
+# Save RF pipeline model
+print(f"Saving RF model to: {MODEL_PATH}")
 pipeline_model.write().overwrite().save(MODEL_PATH)
 print("Model saved.")
 
