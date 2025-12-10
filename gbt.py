@@ -4,14 +4,15 @@ from pyspark.ml.classification import GBTClassifier
 from pyspark.ml import Pipeline
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
 
-# Where to save the trained GBT pipeline model (inside Spark container)
+# Where to save the trained GBT model (inside Spark container)
 MODEL_PATH = "/opt/spark/work-dir/fraud_gbt_model"
 
 # Start Spark
+# can adjust number of partitions for more or less parallelism
 spark = (
     SparkSession.builder
     .appName("Fraud_GBT_Weighted")
-    .config("spark.sql.shuffle.partitions", "8")  # can adjust # of partitions for more or less parallelism
+    .config("spark.sql.shuffle.partitions", "8")
     .getOrCreate()
 )
 
@@ -27,23 +28,9 @@ df = (
 # Convert boolean is_fraud to numeric label 0/1
 df_model = df.withColumn("label", F.col("is_fraud").cast("int"))
 
-# Time-based features from raw timestamp
-df_model = df_model.withColumn("ts", F.to_timestamp("timestamp"))
-df_model = df_model.withColumn("hour_of_day", F.hour("ts"))
-df_model = df_model.withColumn("day_of_week", F.dayofweek("ts"))
-df_model = df_model.withColumn(
-    "is_weekend",
-     (F.col("day_of_week") >= 6).cast("int")
-)
-
-# Use the FULL dataset
-df_used = df_model
-used_rows = df_used.count()
-print(f"Using ALL {used_rows} rows for weighted GBT in Spark.")
-
-# Compute class counts on the dataset (for weighting)
-fraud_count = df_used.filter(F.col("label") == 1).count()
-nonfraud_count = df_used.filter(F.col("label") == 0).count()
+# Compute class counts on the dataset for weighing to help with data imbalance
+fraud_count = df_model.filter(F.col("label") == 1).count()
+nonfraud_count = df_model.filter(F.col("label") == 0).count()
 
 if fraud_count == 0 or nonfraud_count == 0:
     weight_for_fraud = 1.0
@@ -52,12 +39,13 @@ else:
     majority = max(fraud_count, nonfraud_count)
     weight_for_fraud = majority / float(fraud_count)
     weight_for_nonfraud = majority / float(nonfraud_count)
-
-print(f"Weight for fraud (label=1):     {weight_for_fraud:.4f}")
+    
+# Print weight for each class
+print(f"Weight for fraud (label=1): {weight_for_fraud:.4f}")
 print(f"Weight for non-fraud (label=0): {weight_for_nonfraud:.4f}")
 
 # Add weight column based on label
-df_weighted = df_used.withColumn(
+df_weighted = df_model.withColumn(
     "weight",
     F.when(F.col("label") == 1, F.lit(weight_for_fraud))
      .otherwise(F.lit(weight_for_nonfraud))
@@ -72,47 +60,41 @@ categorical_cols = [
 ]
 numeric_cols = [
     "amount",
-    "spending_deviation_score",
-    "velocity_score",
-    "geo_anomaly_score",
-    "hour_of_day",
+    "hour_of_day",  
     "day_of_week",
     "is_weekend",
 ]
 
-# StringIndexer: string -> index
-indexers = [
-    StringIndexer(
-        inputCol=c,
-        outputCol=f"{c}_idx",
-        handleInvalid="keep" 
-    )
-    for c in categorical_cols
-]
+# Create StringIndexers for every categorical column to convert the text categories to a numeric index
+indexers = []
+for feature in categorical_cols:
+    indexer = StringIndexer(inputCol=feature, outputCol=f"{feature}_idx",handleInvalid="keep")
+    indexers.append(indexer)
 
-# OneHotEncoder: index -> one-hot vector
-encoder = OneHotEncoder(
-    inputCols=[f"{c}_idx" for c in categorical_cols],
-    outputCols=[f"{c}_oh" for c in categorical_cols],
-    dropLast=False,  # keep all categories
-)
+# Build input and output lists for before and after encoding 
+input_cols = []
+for feature in categorical_cols:
+    input_cols.append(f"{feature}_idx")
 
-# Final feature columns = numeric + one-hot encoded categorical
-feature_cols = numeric_cols + [f"{c}_oh" for c in categorical_cols]
-print("Using features:", feature_cols)
+output_cols = []
+for feature in categorical_cols:
+    output_cols.append(f"{feature}_oh")
 
-assembler = VectorAssembler(
-    inputCols=feature_cols,
-    outputCol="features",
-    handleInvalid="keep",
-)
+encoder = OneHotEncoder(inputCols=input_cols, outputCols=output_cols, dropLast=False)
 
-# Train/test split on df_weighted BEFORE assembling
+# Combine numeric and one-hot encoded categorical features together for a full list of features
+feature_cols = list(numeric_cols)
+for feature in categorical_cols:
+    feature_cols.append(f"{feature}_oh")
+
+# Combine all features into a single features vector
+assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handleInvalid="keep")
+
+# Train/test split (80/20) 
 train_df, test_df = df_weighted.randomSplit([0.8, 0.2], seed=42)
-print(f"Train count: {train_df.count()}  Test count: {test_df.count()}")
 
 # Gradient-Boosted Trees with class weights
-gbt = GBTClassifier(
+gbt_clf = GBTClassifier(
     featuresCol="features",
     labelCol="label",
     weightCol="weight",
@@ -122,54 +104,65 @@ gbt = GBTClassifier(
     seed=42,
 )
 
-# Build a Pipeline: index -> encode -> assemble -> model
-pipeline = Pipeline(
-    stages=indexers + [encoder, assembler, gbt]
-)
+# Build pipeline with indexers, encoder, assembler, and gbt
+pipeline = Pipeline(stages=indexers + [encoder, assembler, gbt_clf])
 
-pipeline_model = pipeline.fit(train_df)
-print("Weighted GBT pipeline training complete.")
+# Train model
+gbt_pipeline_model = pipeline.fit(train_df)
+print("Training complete.")
 
 # Predictions on test set
-predictions = pipeline_model.transform(test_df).select("label", "prediction").cache()
+predictions = gbt_pipeline_model.transform(test_df).select("label", "prediction").cache()
 
 preds = predictions.select(
     F.col("label").cast("int").alias("label"),
     F.col("prediction").cast("int").alias("prediction")
 )
 
-# confusion matrix
-tp = preds.filter((F.col("label") == 1) & (F.col("prediction") == 1)).count()
-tn = preds.filter((F.col("label") == 0) & (F.col("prediction") == 0)).count()
-fp = preds.filter((F.col("label") == 0) & (F.col("prediction") == 1)).count()
-fn = preds.filter((F.col("label") == 1) & (F.col("prediction") == 0)).count()
+# Calculate metrics for analysis 
+# Confusion matrix
+true_pos = preds.filter((F.col("label") == 1) & (F.col("prediction") == 1)).count()
+true_neg = preds.filter((F.col("label") == 0) & (F.col("prediction") == 0)).count()
+false_pos = preds.filter((F.col("label") == 0) & (F.col("prediction") == 1)).count()
+false_neg = preds.filter((F.col("label") == 1) & (F.col("prediction") == 0)).count()
 
-total = tp + tn + fp + fn
+total = true_pos + true_neg + false_pos + false_neg
 
-accuracy = (tp + tn) / total if total > 0 else 0.0
-precision_fraud = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-recall_fraud = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-f1_fraud = (
-    2 * (precision_fraud * recall_fraud) / (precision_fraud + recall_fraud)
-    if (precision_fraud + recall_fraud) > 0
-    else 0.0
-)
+if total > 0:
+    accuracy = (true_pos + true_neg) / total
+else:
+    accuracy = 0.0
+
+if (true_pos + false_pos) > 0:
+    precision = true_pos / (true_pos + false_pos)
+else:
+    precision = 0.0
+
+if (true_pos + false_neg) > 0:
+    recall = true_pos / (true_pos + false_neg)
+else:
+    recall = 0.0
+
+if (precision + recall) > 0:
+    f1_score = 2 * (precision * recall) / (precision + recall)
+else:
+    f1_score = 0.0
 
 print("\n=== CONFUSION MATRIX (Weighted GBT) ===")
-print(f"TP (fraud predicted fraud):       {tp}")
-print(f"FN (fraud predicted non-fraud):   {fn}")
-print(f"FP (non-fraud predicted fraud):   {fp}")
-print(f"TN (non-fraud predicted non):     {tn}")
+print(f"True Positives (fraud predicted fraud):       {true_pos}")
+print(f"False Negatives (fraud predicted non-fraud):  {false_neg}")
+print(f"False Positives (non-fraud predicted fraud):  {false_pos}")
+print(f"True Negatives (non-fraud predicted non):     {true_neg}")
 
-print("\n=== METRICS (Weighted GBT) ===")
-print(f"Accuracy:              {accuracy:.4f}")
-print(f"Precision (fraud=1):   {precision_fraud:.4f}")
-print(f"Recall (fraud=1):      {recall_fraud:.4f}")
-print(f"F1-score (fraud=1):    {f1_fraud:.4f}")
+
+print("\n=== METRICS for Weighted GBT) ===")
+print(f"Accuracy:    {accuracy:.4f}")
+print(f"Precision:   {precision:.4f}")
+print(f"Recall:      {recall:.4f}")
+print(f"F1-score:    {f1_score:.4f}")
 
 # Save GBT model
-print(f"Saving GBT model to: {MODEL_PATH}")
-pipeline_model.write().overwrite().save(MODEL_PATH)
+gbt_pipeline_model.write().overwrite().save(MODEL_PATH)
 print("Model saved.")
 
 spark.stop()

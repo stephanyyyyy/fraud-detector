@@ -6,6 +6,7 @@ from pyspark.sql.types import (
     StructType, StructField,
     DoubleType, IntegerType, StringType
 )
+from pyspark.ml import PipelineModel
 
 # where to save streamed results (saving into HDFS)
 PREDICTIONS_PATH = "hdfs://namenode:8020/fraud_stream_predictions"
@@ -15,8 +16,6 @@ MODEL_PATH = "/opt/spark/work-dir/fraud_gbt_model"
 
 # Initialize Spark Session with Scala compatibility settings
 spark = (SparkSession.builder
-    # .appName("Fraud_LR_Weighted")
-    # .appName("Fraud_RF_Weighted")
     .appName("Fraud_GPT_Weighted")
     .config("spark.sql.streaming.schemaInference", "true")
     .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -28,18 +27,14 @@ spark.sparkContext.setLogLevel("WARN")
 # Define schema for incoming JSON
 schema = StructType([
     StructField("timestamp", StringType(), True),
-    # numerical futures
     StructField("amount", DoubleType(), True),
-    StructField("spending_deviation_score", DoubleType(), True),
-    StructField("velocity_score", DoubleType(), True),
-    StructField("geo_anomaly_score", DoubleType(), True),
-    # categorical features
     StructField("transaction_type", StringType(), True),
     StructField("device_used", StringType(), True),
     StructField("location", StringType(), True),
     StructField("merchant_category", StringType(), True),
-
-    # is_fraud label
+    StructField("hour_of_day", IntegerType(), True),
+    StructField("day_of_week", IntegerType(), True),
+    StructField("is_weekend", IntegerType(), True),
     StructField("is_fraud", IntegerType(), True),
 ])
 
@@ -53,15 +48,13 @@ df_raw = (spark.readStream
     
     .load())
 
-# Parse JSON from Kafka value (the 'value' field contains transaction JSON)
+# Parse JSON from Kafka value ('value' field contains transaction JSON)
 df_parsed = df_raw.select(
     from_json(col("value").cast("string"), schema).alias("data")
 ).select("data.*")
 
+# Process each micro-batch of streaming data
 def predict_batch(df, epoch_id):
-    """
-    Process each micro-batch of streaming data
-    """
     if df.isEmpty():
         print(f"Epoch {epoch_id}: Empty batch, skipping...")
         return
@@ -69,64 +62,48 @@ def predict_batch(df, epoch_id):
     try:
         print(f"\n=== Processing Epoch {epoch_id} ===")
 
-        # Load the trained GBT pipelime model inside the function
-        from pyspark.ml import PipelineModel
+        # Load the trained GBT pipelime model
         gbt_model = PipelineModel.load(MODEL_PATH)
 
-        # Time-based features (same logic as in training in model)
-        df = df.withColumn("ts", F.to_timestamp("timestamp"))
-        df = df.withColumn("hour_of_day", F.hour("ts"))
-        df = df.withColumn("day_of_week", F.dayofweek("ts"))
-        df = df.withColumn(
-            "is_weekend",
-            (F.col("day_of_week") >= 6).cast("int")
-        )
-
-        # Check for null values
-        null_counts = df.select([col(c).isNull().cast("int").alias(c) for c in df.columns])
-        if null_counts.first():
-            print("Warning: Null values detected")
-            df = df.na.drop()  # drop rows with nulls
-
-        # Let the pipeline handle: index -> one-hot -> assemble -> GBT
+        # Get predictions
         predictions = gbt_model.transform(df)
 
-        # Show predictions
+        # Show transaction and predictions
         predictions.select(
             "timestamp",
             "amount",
-            "spending_deviation_score",
-            "velocity_score",
-            "geo_anomaly_score",
             "transaction_type",
             "device_used",
             "location",
             "merchant_category",
-            "is_fraud",      # ground truth, if present
-            "prediction",
-            "probability"
+            "hour_of_day",
+            "day_of_week",
+            "is_weekend",
+            "is_fraud",      # true label of transaction
+            "prediction",    # what the model predicted
+            "probability"    # probability model calculated for each label (for 0 and 1)
         ).show(truncate=False)
         
         # Save all predictions to HDFS for later analysis
         predictions_to_save = predictions.select(
             "timestamp",
             "amount",
-            "spending_deviation_score",
-            "velocity_score",
-            "geo_anomaly_score",
             "transaction_type",
             "device_used",
             "location",
             "merchant_category",
+            "hour_of_day",
+            "day_of_week",
+            "is_weekend",
             "is_fraud",
             "prediction",
             "probability"
         ).withColumn("batch_id", F.lit(int(epoch_id)))
 
-        # Append this batch to an HDFS Parquet dataset
+        # Append batch to HDFS parquet dataset
         predictions_to_save.write.mode("append").parquet(PREDICTIONS_PATH)
 
-        # Calculate accuracy if ground truth exists
+        # Calculate accuracy for every batch
         if "is_fraud" in predictions.columns:
             correct = predictions.filter(col("is_fraud") == col("prediction")).count()
             total = predictions.count()
@@ -140,12 +117,12 @@ def predict_batch(df, epoch_id):
         import traceback
         traceback.print_exc()
 
-# Start streaming query with error handling
+# Start streaming query
 try:
     query = df_parsed.writeStream \
         .foreachBatch(predict_batch) \
         .option("checkpointLocation", "/tmp/checkpoint") \
-        .trigger(processingTime='5 seconds') \
+        .trigger(processingTime='15 seconds') \
         .start()
 
     print("Streaming query started. Waiting for data...")
