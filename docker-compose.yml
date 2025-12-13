@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode_zk
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    environment:
+      - CLUSTER_NAME=testcluster
+    volumes:
+      - C:/hdfs_data:/data
+      - namenode_name:/hadoop/dfs/name
+    networks:
+      - hadoop-net
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode_zk
+    environment:
+      - CLUSTER_NAME=testcluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - SERVICE_PRECONDITION=namenode:9870
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - hadoop-net
+
+  zookeeper:
+    image: zookeeper:3.8
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    networks:
+      - hadoop-net
+
+  kafka-broker:
+    image: wurstmeister/kafka:2.13-2.8.1
+    container_name: kafka_broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - hadoop-net
+
+  spark:
+    image: spark:python3
+    container_name: spark_zk
+    stdin_open: true
+    tty: true
+    networks:
+      - hadoop-net
+    volumes:
+      - "C:/hdfs_data:/app"
+    environment:
+      - HOME=/tmp
+      - SPARK_SUBMIT_OPTS=-Dspark.jars.ivy=/tmp/ivy
+    command: bash
+    depends_on:
+      - kafka-broker
+      - namenode
+
+networks:
+  hadoop-net:
+    external: true
+    name: hadoop-net
+
+volumes:
+  namenode_name:
+  datanode_data:

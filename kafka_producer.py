@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 
 # Kafka broker
-BROKER = "kafka:9092" # or kafka-broker:9092
+BROKER = "kafka-broker:9092"
 TOPIC = "fraud-transactions"
 
 producer = KafkaProducer(

@@ -9,7 +9,7 @@ from pyspark.sql.types import (
 from pyspark.ml import PipelineModel
 
 # where to save streamed results (saving into HDFS)
-PREDICTIONS_PATH = "hdfs://namenode:8020/fraud_stream_predictions"
+PREDICTIONS_PATH = "hdfs://namenode:8020/user/spark/fraud_stream_predictions"
 
 # Path to the GBT pipeline model trained
 MODEL_PATH = "/opt/spark/work-dir/fraud_gbt_model"
@@ -41,7 +41,7 @@ schema = StructType([
 # Read from Kafka
 df_raw = (spark.readStream
     .format("kafka")
-    .option("kafka.bootstrap.servers", "kafka:9092")
+    .option("kafka.bootstrap.servers", "kafka-broker:9092")
     .option("subscribe", "fraud-transactions")
     .option("startingOffsets", "latest")
     .option("maxOffsetsPerTrigger", "5")
