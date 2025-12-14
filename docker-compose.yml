@@ -64,7 +64,9 @@ services:
       - "C:/hdfs_data:/app"
     environment:
       - HOME=/tmp
+      - SPARK_LOCAL_DIRS=/tmp
       - SPARK_SUBMIT_OPTS=-Dspark.jars.ivy=/tmp/ivy
+
     command: bash
     depends_on:
       - kafka-broker
@@ -72,8 +74,8 @@ services:
 
 networks:
   hadoop-net:
-    external: true
     name: hadoop-net
+    driver: bridge
 
 volumes:
   namenode_name:
