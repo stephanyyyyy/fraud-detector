@@ -60,7 +60,7 @@ Inside the Kafka container, create the topic used for streaming:
 docker exec -it kafka_broker bash
 kafka-topics.sh --bootstrap-server kafka-broker:9092 --create --topic fraud-transactions --partitions 1 --replication-factor 1
 
-## Run the Kafka producer to begin generating synthetic transactions
+## Run the Kafka producer to begin generating transactions
 docker exec -it spark_zk bash
 python3 /app/kafka_producer.py
 
