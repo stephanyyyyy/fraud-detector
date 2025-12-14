@@ -54,7 +54,8 @@ This will generate the trained model at:
 
 ## To run another model to see evaluation metrics run:
 /opt/spark/bin/spark-submit /app/<file_name>
-Create Kafka Topic
+
+## Create Kafka Topic
 Inside the Kafka container, create the topic used for streaming:
 docker exec -it kafka_broker bash
 kafka-topics.sh --bootstrap-server kafka-broker:9092 --create --topic fraud-transactions --partitions 1 --replication-factor 1
