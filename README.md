@@ -1,3 +1,5 @@
+Below are the deployment instructions for the project using the Gradient Boost Trees model for the predictions. The Gradient Boosted Trees model must be retrained to generate the fraud_gpt_model before running streaming.   
+
 ## Prerequisites/Services Used
 * Python 3.10+  
 * Docker & Docker Compose  
