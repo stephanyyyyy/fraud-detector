@@ -15,7 +15,7 @@ numpy (installed inside Spark container)
 Start all services: 
 ```sh
 docker compose up -d
-'''
+```
 Verify containers are running:
 ```sh
 docker compose ps  
