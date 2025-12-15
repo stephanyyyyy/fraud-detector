@@ -12,10 +12,12 @@ kafka-python (installed inside Spark container)
 numpy (installed inside Spark container)  
 
 ## Setup 
-Start all services:  
+Start all services: 
+'''sh
 docker compose up -d  
 Verify containers are running:  
 docker compose ps  
+//
 
 
 ## HDFS Setup
