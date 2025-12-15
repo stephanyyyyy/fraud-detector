@@ -42,6 +42,7 @@ hdfs dfs -put modified_fraud_dataset.csv /training_data
 ## Train the Fraud Detection Model
 docker exec -it spark_zk bash  
 /opt/spark/bin/spark-submit /app/gbt.py  
+
 This will generate the trained model at:   
 /opt/spark/work-dir/fraud_gbt_model  
 
@@ -68,5 +69,5 @@ In a new terminal, start the Spark Structured Streaming job:
 Predictions will be printed to the terminal and saved to HDFS. Verify predictions in HDFS using:  
 hdfs dfs -ls /user/spark/fraud_stream_predictions  
 
-To view actual contents, inside of the Spark container, Run:  
+To view actual contents, inside of the Spark container, run:  
 /opt/spark/bin/spark-submit /app/view_saved_predictions.py  
