@@ -1,3 +1,5 @@
+# training weighted Logistic Regression model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
@@ -39,7 +41,7 @@ else:
     weight_for_fraud = majority / float(fraud_count)
     weight_for_nonfraud = majority / float(nonfraud_count)
 
-# Print weight for each class
+# Print weight for each class 
 print(f"Weight for fraud (label=1): {weight_for_fraud:.4f}")
 print(f"Weight for non-fraud (label=0): {weight_for_nonfraud:.4f}")
 
@@ -65,7 +67,7 @@ numeric_cols = [
     "is_weekend",
 ]
 
-# Create StringIndexers for every categorical column to convert text → numeric index
+# Create StringIndexers for every categorical column to convert text to numeric index
 indexers = []
 for feature in categorical_cols:
     indexer = StringIndexer(
@@ -84,11 +86,7 @@ output_cols = []
 for feature in categorical_cols:
     output_cols.append(f"{feature}_oh")
 
-encoder = OneHotEncoder(
-    inputCols=input_cols,
-    outputCols=output_cols,
-    dropLast=False
-)
+encoder = OneHotEncoder(inputCols=input_cols, outputCols=output_cols, dropLast=False)
 
 # Combine numeric and one-hot encoded categorical features for a full feature list
 feature_cols = list(numeric_cols)
@@ -96,11 +94,7 @@ for feature in categorical_cols:
     feature_cols.append(f"{feature}_oh")
 
 # Combine all features into a single "features" vector
-assembler = VectorAssembler(
-    inputCols=feature_cols,
-    outputCol="features",
-    handleInvalid="keep"
-)
+assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handleInvalid="keep")
 
 # Train/test split (80/20)
 train_df, test_df = df_weighted.randomSplit([0.8, 0.2], seed=42)

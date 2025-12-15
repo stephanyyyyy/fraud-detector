@@ -1,3 +1,5 @@
+# training weighted Gradient Boosted Trees model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.classification import GBTClassifier
@@ -93,7 +95,7 @@ assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handle
 # Train/test split (80/20) 
 train_df, test_df = df_weighted.randomSplit([0.8, 0.2], seed=42)
 
-# Gradient-Boosted Trees with class weights
+# Gradient Boosted Trees with class weights
 gbt_clf = GBTClassifier(
     featuresCol="features",
     labelCol="label",

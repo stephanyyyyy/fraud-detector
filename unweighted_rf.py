@@ -1,3 +1,5 @@
+# training unweighted Random Forest model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler

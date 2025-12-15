@@ -1,3 +1,5 @@
+# training unweighted Logistic Regression Trees model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler

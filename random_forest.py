@@ -1,3 +1,5 @@
+# training weighted Random Forest model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml import Pipeline
@@ -115,7 +117,7 @@ random_forest_clf = RandomForestClassifier(
     seed=42,
 )
 
-# Build pipeline with indexers, encoder, assembler, and rf
+# Build pipeline with indexers, encoder, assembler, and classifier
 pipeline = Pipeline(stages=indexers + [encoder, assembler, random_forest_clf])
 
 # Train model

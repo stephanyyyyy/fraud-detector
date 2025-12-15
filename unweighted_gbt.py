@@ -1,3 +1,5 @@
+# training unweighted Gradient Boosted Trees model
+
 from pyspark.sql import SparkSession, functions as F
 from pyspark.ml.classification import GBTClassifier
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
