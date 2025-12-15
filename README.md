@@ -1,15 +1,15 @@
 ## Prerequisites/Services Used
-Python 3.10+  
-Docker & Docker Compose  
-Hadoop HDFS 3.2.1(NameNode + DataNode)  
-Apache Spark 4.0.1 (PySpark)  
-Apache Kafka 2.8.1  
-Apache Zookeeper 3.8.4  
+* Python 3.10+  
+* Docker & Docker Compose  
+* Hadoop HDFS 3.2.1(NameNode + DataNode)  
+* Apache Spark 4.0.1 (PySpark)  
+* Apache Kafka 2.8.1  
+* Apache Zookeeper 3.8.4  
 
 
 ## Dependencies
-kafka-python (installed inside Spark container)  
-numpy (installed inside Spark container)  
+* kafka-python (installed inside Spark container)  
+* numpy (installed inside Spark container)  
 
 ## Setup 
 Start all services: 
