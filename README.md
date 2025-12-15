@@ -11,18 +11,18 @@ Apache Zookeeper 3.8.4
 kafka-python (installed inside Spark container)
 numpy (installed inside Spark container)
 
-# Setup 
+## Setup 
 Start all services:
 docker compose up -d
 Verify containers are running:
 docker compose ps
 
 
-# HDFS Setup
-Enter the NameNode container and create HDFS directories.
-docker exec -it namenode_zk bash
-hdfs dfs -mkdir -p /training_data
-hdfs dfs -mkdir -p /user/spark
+## HDFS Setup
+Enter the NameNode container and create HDFS directories.  
+docker exec -it namenode_zk bash  
+hdfs dfs -mkdir -p /training_data  
+hdfs dfs -mkdir -p /user/spark  
 
 
 Copy files into the Spark Container
