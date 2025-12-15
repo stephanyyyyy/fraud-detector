@@ -13,11 +13,11 @@ numpy (installed inside Spark container)
 
 ## Setup 
 Start all services: 
-'''sh
+```sh
 docker compose up -d  
 Verify containers are running:  
 docker compose ps  
-//
+```
 
 
 ## HDFS Setup
